@@ -1,4 +1,4 @@
-//Object data modelling library for mongo
+ //Object data modelling library for mongo
 const mongoose = require('mongoose');
 
 //Mongo db client library
@@ -14,13 +14,24 @@ const bodyParser = require('body-parser');
 const app = express()
 const port = 3000
 
+//import the request library
+var request = require('request');
+
+//This is the URL endopint of your vm running docker
+var url = 'http://192.168.56.109:2375';
+
 //Get the hostname of the node
 var os = require("os");
 var myHostname = os.hostname();
-var amqp = require('amqplib/callback_api');
+var leaderCheck = false;
+var nodes = [];
 
 //print the hostname
 console.log("------------ HOSTNAME [%s] ------------",myHostname);
+
+var myNodeID = Math.floor(Math.random() * (100 - 1 + 1) + 1);
+
+var systemLeader = 0;
 
 //connection string listing the mongo servers. This is an alternative to using a load balancer. THIS SHOULD BE DISCUSSED IN YOUR ASSIGNMENT.
 const connectionString = 'mongodb://localmongo1:27017,localmongo2:27017,localmongo3:27017/NotFLIX?replicaSet=rs0';
@@ -57,77 +68,84 @@ var logsSchema = new Schema({
 var logsModel = mongoose.model('Logs', logsSchema, 'logs');
 
 //SUBSCRIBER CODE
-amqp.connect('amqp://test:test@172.16.70.30', function(error0, connection) {
-      if (error0) {
-              throw error0;
-            }
-      connection.createChannel(function(error1, channel) {
-              if (error1) {
-                        throw error1;
-                      }
-              var exchange = 'logs';
+var amqp = require('amqplib/callback_api');
 
-              channel.assertExchange(exchange, 'fanout', {
-                        durable: false
-                      });
-
-              channel.assertQueue('', {
-                        exclusive: true
-                      }, function(error2, q) {
-                                if (error2) {
-                                            throw error2;
-                                          }
-                                console.log(" [*] Waiting for messages in %s. To exit press CTRL+C", q.queue);
-                                channel.bindQueue(q.queue, exchange, '');
-
-                                channel.consume(q.queue, function(msg) {
-                                            if(msg.content) {
-                                                            console.log(" [x] %s", msg.content.toString());
-                                                          }
-                                          }, {
-                                                      noAck: true
-                                                    });
-                              });
-            });
+amqp.connect('amqp://test:test@192.168.56.109', function(error0, connection) {
+    if (error0) {
+        throw error0;
+    }
+    connection.createChannel(function(error1, channel) {
+		if (error1) {
+			throw error1;
+		}
+		
+		var exchange = 'logs';
+		channel.assertExchange(exchange, 'fanout', {
+			durable: false
+		});
+	
+		channel.assertQueue('', {exclusive: true}, function(error2, q) {
+			if (error2) {
+				throw error2;
+			}
+			console.log(" [*] Waiting for messages in %s. To exit press CTRL+C", q.queue);
+			channel.bindQueue(q.queue, exchange, '');
+		
+			channel.consume(q.queue, function(msg) {
+				if(msg.content) {
+					let hostname = JSON.parse(msg.content.toString()).hostname
+					let nodeID = JSON.parse(msg.content.toString()).nodeID
+          let status = JSON.parse(msg.content.toString()).status;                   
+					let datetime = JSON.parse(msg.content.toString()).datetime;
+                             
+					nodes.some(node => node.hostname === hostname) ? (nodes.find(e => e.hostname === hostname)).datetime = datetime : 
+            nodes.push({"nodeID": nodeID,"hostname": hostname, "status": status, "datetime": datetime});
+            
+          nodes.forEach((node, index) => console.log(node));
+           
+				}
+			}, { noAck: true });
+		});
+	});
 });
 
 
 //PUBLISHER CODE
 amqp.connect('amqp://test:test@192.168.56.109', function(error0, connection) {
-      if (error0) {
-              throw error0;
-            }
-      connection.createChannel(function(error1, channel) {});
+    if (error0) {
+		throw error0;
+    }
+    connection.createChannel(function(error1, channel) {});
 });
 
-amqp.connect('amqp://test:test@172.16.70.30', function(error0, connection) {
-
-if (error0) {
-        throw error0;
-      }
-      connection.createChannel(function(error1, channel) {
-              if (error1) {
-                        throw error1;
-                      }
-              var exchange = 'logs';
-              var msg =  'Hello World!';
-
-              channel.assertExchange(exchange, 'fanout', {
-                        durable: false
-                      });
-              channel.publish(exchange, '', Buffer.from(msg));
-              console.log(" [x] Sent %s", msg);
-            });
-
-
-
-
-
-    setTimeout(function() {
-              connection.close();
-              }, 500);
-});
-
+setInterval(function() {
+	amqp.connect('amqp://test:test@192.168.56.109', function(error0, connection) {
+	
+		if (error0) {
+			throw error0;
+		}
+		connection.createChannel(function(error1, channel) {
+			if (error1) {
+				throw error1;
+			}
+			else {
+				leaderCheck = true;
+			}
+			var exchange = 'logs';
+		
+			channel.assertExchange(exchange, 'fanout', {durable: false});
+      
+      toSend = {"hostname" : myHostname, "status": "alive","nodeID" : myNodeID, "datetime" : Date.now()} ;
+			channel.publish(exchange, '', Buffer.from(JSON.stringify(toSend)));
+			console.log(" [SENT] %s", JSON.stringify(toSend));
+ 
+		});
+		
+		setTimeout(function() {
+			connection.close();
+		}, 500);
+	});
+}, 2000);
 
 setInterval(function() {
   console.log("============= LEADER CHECK [1] =============");
@@ -135,7 +153,7 @@ setInterval(function() {
 	leader = 1;
 	activeNodes = 0;
 	Object.entries(nodes).forEach(([hostname,prop]) => {
-	  console.log("test: " + JSON.stringify(hostname) + JSON.stringify(prop) )
+	  //console.log("test: " + JSON.stringify(hostname) + JSON.stringify(prop) )
 	  maxNodeID = myNodeID;
 	  if(hostname != myHostname){
 	    if("nodeID" in prop){
@@ -149,11 +167,9 @@ setInterval(function() {
 		if((leader == 1) && (activeNodes == nodes.length)){
 		  systemLeader = 1;
 		  console.log(myHostname + ": I am the leader now! NODE: " + myNodeID);
-      myLeaderNode = myNodeID;
-      //nodes.find(e => e.nodeID === myNodeID).leaderNode = myNodeID;
-		}
+    }
   });
-}, 2000);
+}, 5000);
 
 
 app.get('/', (req, res) => {
