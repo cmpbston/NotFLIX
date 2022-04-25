@@ -253,13 +253,13 @@ request(create, function (error, response, createBody) {
 setInterval(function() {
   var hour = new Date().getHours();
   
-  if(hour >= 16 && hour < 18 and !autoScaled){
+  if(hour >= 16 && hour < 18 && !autoScaled){
     autoScaled = true;
     console.log("Autoscaling containers to deal with increased load during peak times...");
     var create = {
             uri: url + "/v1.40/containers/create",
 	          method: 'POST',
-            json: {"image": "notflix_node1", "hostname : node4", "name" : "notflix_node4_"}
+            json: {"image": "notflix_node1", "hostname" : "node4", "name" : "notflix_node4_"}
           };
                   
           //send the create request
