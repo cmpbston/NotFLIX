@@ -167,6 +167,84 @@ setInterval(function() {
 		if((leader == 1) && (activeNodes == nodes.length)){
 		  systemLeader = 1;
 		  console.log(myHostname + ": I am the leader now! NODE: " + myNodeID);
+      let time = Date.now();
+      nodes.forEach((node, index) => {
+        let diff = time - node.datetime;
+        console.log(node.hostname + "] nodeTIME: " + node.datetime + " currentTIME: " + time + " diff: " + diff);
+        if(diff >= 5000 && node.hostname != myHostname){ //CHANGE TO 5000 - 10000, 1200 FOR TESTING!!
+         
+          var create = {
+            uri: url + "/v1.40/containers/create",
+	          method: 'POST',
+            json: {"image": "notflix_" + node.hostname, "hostname" : + node.hostname, "name" : "notflix_" + node.hostname + "_"}
+          };
+
+         
+          console.log("ERROR: " + node.hostname + " unresponsive.");
+          console.log("Restarting " + node.hostname);
+          
+          
+          
+          //send the create request
+request(create, function (error, response, createBody) {
+    if (!error) {
+	    console.log("Created container " + JSON.stringify(createBody));
+     
+        //post object for the container start request
+        var start = {
+            uri: url + "/v1.40/containers/" + createBody.Id + "/start",
+	      	method: 'POST',
+	        json: {}
+	    };
+		
+	    //send the start request
+        request(start, function (error, response, startBody) {
+	        if (!error) {
+		        console.log("Container start completed");
+	    
+                //post object for  wait 
+                var wait = {
+			        uri: url + "/v1.40/containers/" + createBody.Id + "/wait",
+                    method: 'POST',
+		            json: {}
+		        };
+		   
+                
+			    request(wait, function (error, response, waitBody ) {
+			        if (!error) {
+				        console.log("run wait complete, container will have started");
+			            
+                        //send a simple get request for stdout from the container
+                        request.get({
+                            url: url + "/v1.40/containers/" + createBody.Id + "/logs?stdout=1",
+                            }, (err, res, data) => {
+                                    if (err) {
+                                        console.log('Error:', err);
+                                    } else if (res.statusCode !== 200) {
+                                        console.log('Status:', res.statusCode);
+                                    } else{
+                                        //we need to parse the json response to access
+                                        console.log("Container stdout = " + data);
+                                        containerQty();
+                                    }
+                                });
+                        }
+		        });
+            }
+        });
+
+    }   
+});
+
+
+
+
+
+
+          
+          
+        }
+      })
     }
   });
 }, 5000);
