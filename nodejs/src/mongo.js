@@ -24,6 +24,7 @@ var url = 'http://192.168.56.109:2375';
 var os = require("os");
 var myHostname = os.hostname();
 var leaderCheck = false;
+var autoScaled = false;
 var nodes = [];
 
 //print the hostname
@@ -70,7 +71,7 @@ var logsModel = mongoose.model('Logs', logsSchema, 'logs');
 //SUBSCRIBER CODE
 var amqp = require('amqplib/callback_api');
 
-amqp.connect('amqp://test:test@192.168.56.109', function(error0, connection) {
+amqp.connect('amqp://user:bitnami@192.168.56.109', function(error0, connection) {
     if (error0) {
         throw error0;
     }
@@ -111,7 +112,7 @@ amqp.connect('amqp://test:test@192.168.56.109', function(error0, connection) {
 
 
 //PUBLISHER CODE
-amqp.connect('amqp://test:test@192.168.56.109', function(error0, connection) {
+amqp.connect('amqp://user:bitnami@192.168.56.109', function(error0, connection) {
     if (error0) {
 		throw error0;
     }
@@ -119,7 +120,7 @@ amqp.connect('amqp://test:test@192.168.56.109', function(error0, connection) {
 });
 
 setInterval(function() {
-	amqp.connect('amqp://test:test@192.168.56.109', function(error0, connection) {
+	amqp.connect('amqp://user:bitnami@192.168.56.109', function(error0, connection) {
 	
 		if (error0) {
 			throw error0;
@@ -171,7 +172,7 @@ setInterval(function() {
       nodes.forEach((node, index) => {
         let diff = time - node.datetime;
         console.log(node.hostname + "] nodeTIME: " + node.datetime + " currentTIME: " + time + " diff: " + diff);
-        if(diff >= 5000 && node.hostname != myHostname){ //CHANGE TO 5000 - 10000, 1200 FOR TESTING!!
+        if(diff >= 10000 && node.hostname != myHostname){ 
          
           var create = {
             uri: url + "/v1.40/containers/create",
@@ -248,6 +249,73 @@ request(create, function (error, response, createBody) {
     }
   });
 }, 5000);
+
+setInterval(function() {
+  var hour = new Date().getHours();
+  
+  if(hour >= 16 && hour < 18 and !autoScaled){
+    autoScaled = true;
+    console.log("Autoscaling containers to deal with increased load during peak times...");
+    var create = {
+            uri: url + "/v1.40/containers/create",
+	          method: 'POST',
+            json: {"image": "notflix_node1", "hostname : node4", "name" : "notflix_node4_"}
+          };
+                  
+          //send the create request
+request(create, function (error, response, createBody) {
+    if (!error) {
+	    console.log("Created container " + JSON.stringify(createBody));
+     
+        //post object for the container start request
+        var start = {
+            uri: url + "/v1.40/containers/" + createBody.Id + "/start",
+	      	method: 'POST',
+	        json: {}
+	    };
+		
+	    //send the start request
+        request(start, function (error, response, startBody) {
+	        if (!error) {
+		        console.log("Container start completed");
+	    
+                //post object for  wait 
+                var wait = {
+			        uri: url + "/v1.40/containers/" + createBody.Id + "/wait",
+                    method: 'POST',
+		            json: {}
+		        };
+		   
+                
+			    request(wait, function (error, response, waitBody ) {
+			        if (!error) {
+				        console.log("run wait complete, container will have started");
+			            
+                        //send a simple get request for stdout from the container
+                        request.get({
+                            url: url + "/v1.40/containers/" + createBody.Id + "/logs?stdout=1",
+                            }, (err, res, data) => {
+                                    if (err) {
+                                        console.log('Error:', err);
+                                    } else if (res.statusCode !== 200) {
+                                        console.log('Status:', res.statusCode);
+                                    } else{
+                                        //we need to parse the json response to access
+                                        console.log("Container stdout = " + data);
+                                        containerQty();
+                                    }
+                                });
+                        }
+		        });
+            }
+        });
+
+    }   
+});
+    
+}
+
+}, 1000);
 
 
 app.get('/', (req, res) => {
